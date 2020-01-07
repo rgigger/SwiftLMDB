@@ -100,4 +100,15 @@ public class Environment {
         return try Database(environment: self, name: name, flags: flags)
     }
     
+    public func read(transactionBlock: (Transaction) -> Transaction.Action) throws {
+        try Transaction(environment: self, flags: .readOnly) { transaction -> Transaction.Action in
+            transactionBlock(transaction)
+        }
+    }
+        
+    public func write(transactionBlock: (Transaction) -> Transaction.Action) throws {
+        try Transaction(environment: self) { transaction -> Transaction.Action in
+            transactionBlock(transaction)
+        }
+    }
 }

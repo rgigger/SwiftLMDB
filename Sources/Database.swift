@@ -93,7 +93,7 @@ public class Database {
     /// - returns: Returns the value as an instance of type `V` or `nil` if no value exists for the key or the type could not be instatiated with the data.
     /// - note: You can always use `Foundation.Data` as the type. In such case, `nil` will only be returned if there is no value for the key.
     /// - throws: an error if operation fails. See `LMDBError`.
-    public func get<V: DataConvertible, K: DataConvertible>(type: V.Type, forKey key: K) throws -> V? {
+    public func get<V: DataConvertible, K: DataConvertible>(type: V.Type, forKey key: K, withTransaction transaction: Transaction?) throws -> V? {
         
         var keyData = key.asData
         
@@ -108,11 +108,13 @@ public class Database {
             
             var getStatus: Int32 = 0
             
-            try Transaction(environment: environment, flags: .readOnly) { transaction -> Transaction.Action in
-                
-                getStatus = mdb_get(transaction.handle, handle, &keyVal, &dataVal)
-                return .commit
-                
+            if let unwrappedTx = transaction {
+                getStatus = mdb_get(unwrappedTx.handle, handle, &keyVal, &dataVal)
+            } else {
+                try Transaction(environment: environment, flags: .readOnly) { tx -> Transaction.Action in
+                    getStatus = mdb_get(tx.handle, handle, &keyVal, &dataVal)
+                    return .commit
+                }
             }
             
             guard getStatus != MDB_NOTFOUND else {
@@ -126,17 +128,15 @@ public class Database {
             let data = Data(bytes: dataVal.mv_data, count: dataVal.mv_size)
             
             return V(data: data)
-            
         }
-        
     }
     
     /// Check if a value exists for the given key.
     /// - parameter key: The key to check for.
     /// - returns: `true` if the database contains a value for the key. `false` otherwise.
     /// - throws: an error if operation fails. See `LMDBError`.
-    public func exists<K: DataConvertible>(key: K) throws -> Bool {
-        return try get(type: Data.self, forKey: key) != nil
+    public func exists<K: DataConvertible>(key: K, withTransaction transaction: Transaction?) throws -> Bool {
+        return try get(type: Data.self, forKey: key, withTransaction: transaction) != nil
     }
 
     /// Inserts a value into the database.
@@ -144,7 +144,7 @@ public class Database {
     /// - parameter key: The key which the data will be associated with. The key must conform to `DataConvertible`. Passing an empty key will cause an error to be thrown.
     /// - parameter flags: An optional set of flags that modify the behavior if the put operation. Default is [] (empty set).
     /// - throws: an error if operation fails. See `LMDBError`.
-    public func put<V: DataConvertible, K: DataConvertible>(value: V, forKey key: K, flags: PutFlags = []) throws {
+    public func put<V: DataConvertible, K: DataConvertible>(value: V, forKey key: K, flags: PutFlags = [], withTransaction transaction: Transaction?) throws {
         
         var keyData = key.asData
         var valueData = value.asData
@@ -161,17 +161,18 @@ public class Database {
                 
                 var putStatus: Int32 = 0
                 
-                try Transaction(environment: self.environment) { transaction -> Transaction.Action in
-                    
-                    putStatus = mdb_put(transaction.handle, self.handle, &keyVal, &valueVal, UInt32(flags.rawValue))
-                    return .commit
-                    
+                if let unwrappedTx = transaction {
+                    putStatus = mdb_put(unwrappedTx.handle, self.handle, &keyVal, &valueVal, UInt32(flags.rawValue))
+                } else {
+                    try Transaction(environment: self.environment) { tx -> Transaction.Action in
+                        putStatus = mdb_put(tx.handle, self.handle, &keyVal, &valueVal, UInt32(flags.rawValue))
+                        return .commit
+                    }
                 }
                 
                 guard putStatus == 0 else {
                     throw LMDBError(returnCode: putStatus)
                 }
-                
             }
         }
         
