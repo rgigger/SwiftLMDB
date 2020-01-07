@@ -14,6 +14,9 @@ class SwiftLMDBTests: XCTestCase {
 
     static let envPath: String = {
 
+        // TODO: this should probably also append a random string to the end to make sure that if you
+        //       ever have tests running at the same time they won't interfere with each other
+        //       it should then delete the directory when everything is done
         let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
         let envURL = tempURL.appendingPathComponent("SwiftLMDBTests/")
         
@@ -49,8 +52,10 @@ class SwiftLMDBTests: XCTestCase {
     }
     
     // MARK: - Helpers
+    
     private func createDatabase(named name: String, flags: Database.Flags = []) -> Database {
         do {
+            // this relies on the
             let environment = try Environment(path: envPath, flags: [], maxDBs: 32)
             return try environment.openDatabase(named: #function, flags: [.create])
         } catch {
@@ -60,21 +65,27 @@ class SwiftLMDBTests: XCTestCase {
     }
     
     // Inserts a value and reads it back, verifying that the two values match.
-    private func putGetValue<T>(value: T, key: String, in database: Database) where T: DataConvertible & Equatable {
-        
+    private func putGetValue<T>(value: T, key: String, in database: Database, withTransaction transaction: Transaction? = nil) where T: DataConvertible & Equatable {
         do {
-            try database.put(value: value, forKey: key)
-            let fetchedValue = try database.get(type: type(of: value), forKey: key)
-            
+            try database.put(value: value, forKey: key, withTransaction: transaction)
+            let fetchedValue = try database.get(type: type(of: value), forKey: key, withTransaction: transaction)
             XCTAssertEqual(value, fetchedValue, "The returned value does not match the one that was set.")
-            
         } catch {
             XCTFail(error.localizedDescription)
             fatalError()
         }
-        
     }
-    
+
+    private func checkValue<T>(value: T, key: String, in database: Database) where T: DataConvertible & Equatable {
+        do {
+            let fetchedValue = try database.get(type: type(of: value), forKey: key, withTransaction: nil)
+            XCTAssertEqual(value, fetchedValue, "The returned value does not match the expected value.")
+        } catch {
+            XCTFail(error.localizedDescription)
+            fatalError()
+        }
+
+    }
     
     // MARK: - Tests
     
@@ -114,10 +125,10 @@ class SwiftLMDBTests: XCTestCase {
         let keyWithoutValue = "hv2"
         
         do {
-            try database.put(value: value, forKey: keyWithValue)
+            try database.put(value: value, forKey: keyWithValue, withTransaction: nil)
             
-            let hasValue1 = try database.exists(key: keyWithValue)
-            let hasValue2 = try database.exists(key: keyWithoutValue)
+            let hasValue1 = try database.exists(key: keyWithValue, withTransaction: nil)
+            let hasValue2 = try database.exists(key: keyWithoutValue, withTransaction: nil)
             
             XCTAssertEqual(hasValue1, true, "A value has been set for this key. Result should be true.")
             XCTAssertEqual(hasValue2, false, "No value has been set for this key. Result should be false.")
@@ -164,17 +175,70 @@ class SwiftLMDBTests: XCTestCase {
         putGetValue(value: Double.leastNormalMagnitude, key: nextKey(), in: database)
         
     }
+
+    func testPutGetWithWrappingTransaction() {
+
+        var environment: Environment
+        var database1: Database
+        var database2: Database
+        do {
+            environment = try Environment(path: envPath, flags: [], maxDBs: 32)
+            let db1Name = "\(#function)1"
+            let db2Name = "\(#function)2"
+            database1 = try environment.openDatabase(named: db1Name, flags: [.create])
+            database2 = try environment.openDatabase(named: db2Name, flags: [.create])
+        } catch {
+            XCTFail(error.localizedDescription)
+            fatalError()
+        }
+        
+        let key = "key"
+        let beforeValue = "before"
+        let afterValue = "after"
+        putGetValue(value: beforeValue, key: key, in: database1)
+        putGetValue(value: beforeValue, key: key, in: database2)
+        do {
+            try environment.write { transaction in
+                putGetValue(value: afterValue, key: key, in: database1, withTransaction: transaction)
+                putGetValue(value: afterValue, key: key, in: database2, withTransaction: transaction)
+                return .abort
+            }
+        } catch {
+            XCTFail(error.localizedDescription)
+            fatalError()
+        }
+
+        checkValue(value: beforeValue, key: key, in: database1)
+        checkValue(value: beforeValue, key: key, in: database2)
+        
+        do {
+            try environment.write { transaction in
+                putGetValue(value: afterValue, key: key, in: database1, withTransaction: transaction)
+                putGetValue(value: afterValue, key: key, in: database2, withTransaction: transaction)
+                return .commit
+            }
+        } catch {
+            XCTFail(error.localizedDescription)
+            fatalError()
+        }
+
+        checkValue(value: afterValue, key: key, in: database1)
+        checkValue(value: afterValue, key: key, in: database2)
+
+    }
+
+    
     
     func testCount() {
-        
-        let database = createDatabase(named: #function)
-
+        let dbName = #function
+        let database = createDatabase(named: dbName)
+        XCTAssertEqual(database.count, 0)
         let count = 10
         
         do {
             
             for i in 0..<count {
-                try database.put(value: "value-\(i)", forKey: "key-\(i)")
+                try database.put(value: "value-\(i)", forKey: "key-\(i)", withTransaction: nil)
             }
             
             XCTAssertEqual(count, database.count)
@@ -190,7 +254,7 @@ class SwiftLMDBTests: XCTestCase {
         let database = createDatabase(named: #function)
         
         XCTAssertThrowsError(
-            try database.put(value: "test", forKey: "")
+            try database.put(value: "test", forKey: "", withTransaction: nil)
         )
 
     }
@@ -202,13 +266,13 @@ class SwiftLMDBTests: XCTestCase {
         
         do {
             // Put a value
-            try database.put(value: "Hello world!", forKey: key)
+            try database.put(value: "Hello world!", forKey: key, withTransaction: nil)
             
             // Delete the value.
             try database.deleteValue(forKey: key)
             
             // Get the value
-            let retrievedData = try database.get(type: Data.self, forKey: key)
+            let retrievedData = try database.get(type: Data.self, forKey: key, withTransaction: nil)
             XCTAssertNil(retrievedData, "Value still present after delete.")
         } catch {
             XCTFail(error.localizedDescription)
@@ -274,13 +338,13 @@ class SwiftLMDBTests: XCTestCase {
         let key = "test"
         do {
             // Put a value
-            try database.put(value: "Hello world!", forKey: key)
+            try database.put(value: "Hello world!", forKey: key, withTransaction: nil)
 
             // Empty the database.
             try database.empty()
             
             // Get the value. We want the result to be nil, because the database was emptied.
-            let retrievedData = try database.get(type: Data.self, forKey: key)
+            let retrievedData = try database.get(type: Data.self, forKey: key, withTransaction: nil)
             XCTAssertNil(retrievedData, "Value still present after database being emptied.")
             
         } catch {
