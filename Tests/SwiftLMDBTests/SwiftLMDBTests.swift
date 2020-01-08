@@ -224,6 +224,28 @@ class SwiftLMDBTests: XCTestCase {
 
         checkValue(value: afterValue, key: key, in: database1)
         checkValue(value: afterValue, key: key, in: database2)
+        
+        do {
+            try environment.read(transactionBlock: { transaction -> Transaction.Action in
+                do {
+                    let cursor = try Cursor(database: database1, transaction: transaction)
+                    let (keyData, valData) = try cursor.first()
+                    let retreivedKey = String(data: keyData)
+                    let retrevedVal = String(data: valData)            
+                    debugPrint("results:", retreivedKey!, retrevedVal!)
+
+                } catch {
+                    XCTFail(error.localizedDescription)
+                    fatalError()
+                }
+                // TODO: why do we need to return anything for the read only transactions
+                return .commit
+            })
+        } catch {
+           XCTFail(error.localizedDescription)
+           fatalError()
+       }
+
 
     }
 
