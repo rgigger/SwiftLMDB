@@ -39,7 +39,9 @@ public class Database {
         public static let appendDuplicate = PutFlags(rawValue: MDB_APPENDDUP)
     }
     
-    private var handle: MDB_dbi = 0
+    // TODO: why var and not let here? This shouldn't change after init, right?
+    internal private(set) var handle: MDB_dbi = 0
+
     private let environment: Environment
     
     /// The number of entries contained in the database.
