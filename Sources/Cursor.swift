@@ -25,7 +25,7 @@ public struct Cursor {
         }
     }
     
-    func first() throws -> (key: Data, value: Data) {
+    public func first() throws -> (key: Data, value: Data) {
         var keyVal = MDB_val()
         var dataVal = MDB_val()
         var status: Int32 = 0
