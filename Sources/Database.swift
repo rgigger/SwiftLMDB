@@ -238,5 +238,9 @@ public class Database {
         }
         
     }
+    
+    public func createCursor(transaction: Transaction) throws -> Cursor {
+        return try Cursor(database: self, transaction: transaction)
+    }
 
 }

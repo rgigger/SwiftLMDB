@@ -225,10 +225,11 @@ class SwiftLMDBTests: XCTestCase {
         checkValue(value: afterValue, key: key, in: database1)
         checkValue(value: afterValue, key: key, in: database2)
         
+        // TODO: break this out into it's own test
         do {
             try environment.read(transactionBlock: { transaction -> Transaction.Action in
                 do {
-                    let cursor = try Cursor(database: database1, transaction: transaction)
+                    let cursor = try database1.createCursor(transaction: transaction)
                     let (keyData, valData) = try cursor.first()
                     let retreivedKey = String(data: keyData)
                     let retrevedVal = String(data: valData)            
